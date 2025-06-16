@@ -2,9 +2,11 @@
 const {
   Model
 } = require('sequelize');
-const {Enums} = require('../utils/common')
-const {CANCELLED,PENDING,BOOKED,INITIATED} = Enums.BOOKING_STATUS
+const { Enums } = require("../utils/common/index");
+const {CANCELLED, BOOKED, PENDING, INITIATED} =  Enums.BOOKING_STATUS;
+
 module.exports = (sequelize, DataTypes) => {
+
   class Booking extends Model {
     /**
      * Helper method for defining associations.
