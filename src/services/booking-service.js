@@ -1,7 +1,7 @@
 const axios = require("axios");
 const db = require("../models");
 const { BookingRepository } = require("../repositories");
-const { ServerConfig } = require("../config");
+const { ServerConfig,Queue } = require("../config");
 const AppError = require("../utils/errors/app-error");
 const { StatusCodes } = require("http-status-codes");
 const { Enums } = require("../utils/common");
@@ -35,6 +35,7 @@ async function createBooking(data) {
     );
 
     await transaction.commit();
+   
     return booking;
   } catch (error) {
     await transaction.rollback(); // <- FIXED: added ()
@@ -42,53 +43,40 @@ async function createBooking(data) {
   }
 }
 
+
 async function makePayment(data) {
-  const transaction = await db.sequelize.transaction();
-  try {
-    const bookingDetails = await bookingRepository.get(
-      data.bookingId,
-      transaction
-    );
-    if (bookingDetails.status == CANCELLED) {
-      throw new AppError(
-        "The amount of payement doesnt match ",
-        StatusCodes.BAD_REQUEST
-      );
+    const transaction = await db.sequelize.transaction();
+    try {
+        const bookingDetails = await bookingRepository.get(data.bookingId, transaction);
+        if(bookingDetails.status == CANCELLED) {
+            throw new AppError('The booking has expired', StatusCodes.BAD_REQUEST);
+        }
+        console.log(bookingDetails);
+        const bookingTime = new Date(bookingDetails.createdAt);
+        const currentTime = new Date();
+        if(currentTime - bookingTime > 300000) {
+            await cancelBooking(data.bookingId);
+            throw new AppError('The booking has expired', StatusCodes.BAD_REQUEST);
+        }
+        if(bookingDetails.totalCost != data.totalCost) {
+            throw new AppError('The amount of the payment doesnt match', StatusCodes.BAD_REQUEST);
+        }
+        if(bookingDetails.userId != data.userId) {
+            throw new AppError('The user corresponding to the booking doesnt match', StatusCodes.BAD_REQUEST);
+        }
+        // we assume here that payment is successful
+        await bookingRepository.update(data.bookingId, {status: BOOKED}, transaction);
+        Queue.sendData({
+            recepientEmail: 'dikshasinghlodhi@gmail.com',
+            subject: 'Flight booked',
+            text: `Booking successfully done for the booking ${data.bookingId}`
+        });
+        await transaction.commit();
+        
+    } catch(error) {
+        await transaction.rollback();
+        throw error;
     }
-
-    const bookingTime = new Date(bookingDetails.createdAt);
-    const currentTime = new Date();
-    if (currentTime - bookingTime > 300000) {
-      await cancelBooking( data.bookingId );
-      throw new AppError(
-        "The booking time has expired ",
-        StatusCodes.BAD_REQUEST
-      );
-    }
-    if (bookingDetails.totalCost != data.totalCost) {
-      throw new AppError(
-        "The amount of payement doesnt match ",
-        StatusCodes.BAD_REQUEST
-      );
-    }
-    if (bookingDetails.userId != data.userId) {
-      throw new AppError(
-        "The user corresponding to the booking doesnt match",
-        StatusCodes.BAD_REQUEST
-      );
-    }
-    ///  we assume here that payemnt is succesful
-
-    await bookingRepository.update(
-      data.bookingId,
-      { status: BOOKED },
-      transaction
-    );
-    await transaction.commit();
-  } catch (error) {
-    await transaction.rollback();
-    throw error;
-  }
 }
 
 async function cancelBooking(bookingId) {
